@@ -32,7 +32,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { marked } from "marked";
-import { api, mediaUrl } from "./api";
+import { api, mediaUrl, API_BASE } from "./api";
 import { parseTasks } from "./tasks.js";
 import { confirmDelete, promptText } from "./dialogs.jsx";
 import MermaidModal from "./MermaidModal.jsx";
@@ -245,14 +245,17 @@ export default function NoteView({ note, folders, allTags, onSaved, onDeleted, d
     for (const b of editor.document) {
       if (b.type === "image") {
         await flush();
-        // persist "width,height" so both survive reloads (height 0 = auto)
-        // store the path relative to the backend ("/media/x.png"), not the full
-        // URL, so it keeps working if the backend URL changes
+        // persist "width,height" so both survive reloads (height 0 = auto).
+        // Only relativize a URL that points at OUR OWN backend (so it survives
+        // a backend-URL change, e.g. a new ngrok domain) — a third-party URL
+        // (Supabase Storage) must stay absolute, or it'd resolve against the
+        // wrong origin on load.
         const u = b.props?.url || "";
+        const isOwnBackend = API_BASE && u.startsWith(API_BASE);
         stored.push({
           type: "image",
           content: `${diagramW},${diagramH}`,
-          image_path: u.startsWith("http") ? new URL(u).pathname : u,
+          image_path: isOwnBackend ? new URL(u).pathname : u,
         });
       } else {
         buf.push(b);
