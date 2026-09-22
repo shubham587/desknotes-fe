@@ -32,7 +32,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { marked } from "marked";
-import { api } from "./api";
+import { api, mediaUrl } from "./api";
 import { parseTasks } from "./tasks.js";
 import { confirmDelete, promptText } from "./dialogs.jsx";
 import MermaidModal from "./MermaidModal.jsx";
@@ -76,7 +76,7 @@ export default function NoteView({ note, folders, allTags, onSaved, onDeleted, d
   const editor = useCreateBlockNote({
     uploadFile: async (file) => {
       const { url } = await api.upload(file);
-      return `${location.origin}${url}`;
+      return mediaUrl(url);
     },
   });
   const [title, setTitle] = useState(note.title);
@@ -198,8 +198,8 @@ export default function NoteView({ note, folders, allTags, onSaved, onDeleted, d
   useEffect(() => editor.onChange?.(onEditorChange), [editor]);
   // convert Mermaid from the full original photo (crop may be clipped); fall back to the crop
   const mermaidSource = note.originals?.[0]
-    ? `${location.origin}${note.originals[0]}`
-    : diagram && `${location.origin}${diagram.image_path}`;
+    ? mediaUrl(note.originals[0])
+    : diagram && mediaUrl(diagram.image_path);
 
   // Load stored blocks into the editor: text content is parsed as MARKDOWN (so
   // headings/lists/bold render nicely — incl. imported .md), images stay images.
@@ -210,7 +210,7 @@ export default function NoteView({ note, folders, allTags, onSaved, onDeleted, d
       for (const b of note.blocks || []) {
         if (b.type === "image" && b.image_path) {
           // image blocks store "width,height" in content (persisted resize)
-          out.push({ type: "image", props: { url: b.image_path, previewWidth: Number((b.content || "").split(",")[0]) || 520 } });
+          out.push({ type: "image", props: { url: mediaUrl(b.image_path), previewWidth: Number((b.content || "").split(",")[0]) || 520 } });
         } else if ((b.content || "").trim()) {
           out.push(...(await mdToBlocks(editor, b.content)));
         }
@@ -246,10 +246,13 @@ export default function NoteView({ note, folders, allTags, onSaved, onDeleted, d
       if (b.type === "image") {
         await flush();
         // persist "width,height" so both survive reloads (height 0 = auto)
+        // store the path relative to the backend ("/media/x.png"), not the full
+        // URL, so it keeps working if the backend URL changes
+        const u = b.props?.url || "";
         stored.push({
           type: "image",
           content: `${diagramW},${diagramH}`,
-          image_path: b.props?.url || "",
+          image_path: u.startsWith("http") ? new URL(u).pathname : u,
         });
       } else {
         buf.push(b);

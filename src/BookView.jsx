@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ActionIcon, Group, Modal, Text } from "@mantine/core";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
+import { mediaUrl } from "./api";
 
 const LINES_PER_PAGE = 12;
 
@@ -9,7 +10,7 @@ const LINES_PER_PAGE = 12;
 function toLines(blocks) {
   const lines = [];
   for (const b of blocks || []) {
-    if (b.type === "image" && b.image_path) lines.push({ type: "image", src: b.image_path });
+    if (b.type === "image" && b.image_path) lines.push({ type: "image", src: mediaUrl(b.image_path) });
     else for (const l of (b.content || "").split("\n")) lines.push({ type: "text", text: l });
   }
   return lines;

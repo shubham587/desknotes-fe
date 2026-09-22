@@ -3,7 +3,7 @@ import { Button, Code, Group, Image, Loader, Modal, Stack, Text } from "@mantine
 import { notifications } from "@mantine/notifications";
 import { IconReplace } from "@tabler/icons-react";
 import mermaid from "mermaid";
-import { api } from "./api";
+import { api, mediaUrl } from "./api";
 
 mermaid.initialize({ startOnLoad: false });
 
@@ -80,7 +80,7 @@ export default function MermaidModal({ sourcePath, onReplace, onClose }) {
       const png = await svgToPng(svg);
       const file = new File([png], "diagram.png", { type: "image/png" });
       const { url } = await api.upload(file);
-      await onReplace(`${location.origin}${url}`);
+      await onReplace(mediaUrl(url));
       notifications.show({ message: "Diagram replaced with Mermaid", color: "green" });
       onClose();
     } catch (e) {

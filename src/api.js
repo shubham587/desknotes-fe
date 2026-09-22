@@ -1,16 +1,24 @@
-// Tiny fetch wrapper: base = /api (proxied to backend), bearer token in localStorage.
+// Tiny fetch wrapper. Backend base comes from VITE_API_URL (set in production);
+// empty in dev so the Vite proxy handles /api and /media. Bearer token in localStorage.
 
 const TOKEN_KEY = "desknotes_token";
+
+// e.g. "https://xxxx.ngrok-free.app" in prod, "" in dev (proxy). Trailing slash stripped.
+export const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+
+// Turn a stored media path ("/media/x.png") into a full URL against the backend.
+// Leaves absolute URLs (e.g. future object-storage links) untouched.
+export const mediaUrl = (p) => (!p ? p : /^https?:\/\//.test(p) ? p : `${API_BASE}${p}`);
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
 async function req(path, opts = {}) {
-  const headers = { ...(opts.headers || {}) };
+  const headers = { "ngrok-skip-browser-warning": "true", ...(opts.headers || {}) };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api${path}`, { ...opts, headers });
+  const res = await fetch(`${API_BASE}/api${path}`, { ...opts, headers });
   if (res.status === 401) {
     clearToken();
     throw new Error("unauthorized");
