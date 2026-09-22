@@ -14,11 +14,16 @@ export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
+// Dev (no VITE_API_URL): go through the Vite proxy at /api, which strips the
+// prefix before forwarding (see vite.config.js). Prod (VITE_API_URL set): call
+// the backend directly — its routes have no /api prefix, so don't add one.
+const REQ_BASE = API_BASE ? API_BASE : "/api";
+
 async function req(path, opts = {}) {
   const headers = { "ngrok-skip-browser-warning": "true", ...(opts.headers || {}) };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}/api${path}`, { ...opts, headers });
+  const res = await fetch(`${REQ_BASE}${path}`, { ...opts, headers });
   if (res.status === 401) {
     clearToken();
     throw new Error("unauthorized");
