@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { Box, Button, Group, Modal, Radio, Stack, Text, TextInput } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 
 // Shown on save when task lines are detected. Choose to add them as separate
 // todos or grouped into one named checklist.
 export default function AddTasksModal({ tasks, defaultName, onSeparate, onChecklist, onClose }) {
   const [mode, setMode] = useState("checklist");
   const [name, setName] = useState(defaultName || "");
+  // top-anchored (not vertically centered) on phones — a centered modal with a
+  // focused text input ends up rendered behind the on-screen keyboard
+  const isMobile = useMediaQuery("(max-width: 48em)");
 
   const submit = () => {
     if (mode === "checklist") onChecklist(name.trim() || defaultName || "Checklist", tasks);
@@ -14,7 +18,12 @@ export default function AddTasksModal({ tasks, defaultName, onSeparate, onCheckl
   };
 
   return (
-    <Modal opened onClose={onClose} centered title={`Found ${tasks.length} task${tasks.length > 1 ? "s" : ""}`}>
+    <Modal
+      opened
+      onClose={onClose}
+      centered={!isMobile}
+      title={`Found ${tasks.length} task${tasks.length > 1 ? "s" : ""}`}
+    >
       <Stack>
         <Text size="sm" c="dimmed">
           How do you want to add {tasks.length > 1 ? "these" : "this"} to your Todos?

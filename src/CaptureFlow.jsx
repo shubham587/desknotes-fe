@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Group, Modal, Stack, Text } from "@mantine/core";
+import { Button, Checkbox, Group, Modal, Stack, Text } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { IconRotateClockwise, IconRotate2 } from "@tabler/icons-react";
 import ReactCrop from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
+
+const AUTO_TAGS_KEY = "desknotes_auto_tags";
+const getAutoTagsPref = () => localStorage.getItem(AUTO_TAGS_KEY) !== "off"; // default on
 
 const fileToDataURL = (file) =>
   new Promise((res) => {
@@ -64,8 +68,12 @@ export default function CaptureFlow({ files, onCancel, onDone }) {
   const [src, setSrc] = useState(null);
   const [crop, setCrop] = useState();
   const [completed, setCompleted] = useState();
+  const [autoTags, setAutoTags] = useState(getAutoTagsPref);
   const imgRef = useRef(null);
   const collected = useRef([]);
+  // full-screen on phones so the crop area + action buttons both fit without
+  // scrolling the modal itself to reach Transcribe
+  const isMobile = useMediaQuery("(max-width: 48em)");
 
   // load current file whenever idx changes
   useEffect(() => {
@@ -80,25 +88,50 @@ export default function CaptureFlow({ files, onCancel, onDone }) {
     const file = await toCroppedFile(imgRef.current, completed, files[idx].name);
     collected.current.push(file);
     if (idx < files.length - 1) setIdx(idx + 1);
-    else onDone(collected.current);
+    else {
+      localStorage.setItem(AUTO_TAGS_KEY, autoTags ? "on" : "off");
+      onDone(collected.current, autoTags);
+    }
   };
 
   const isLast = idx === files.length - 1;
 
   return (
-    <Modal opened onClose={onCancel} size="lg" title={`Crop & rotate — ${idx + 1} of ${files.length}`}>
-      <Stack>
-        <Text size="sm" c="dimmed">
+    <Modal
+      opened
+      onClose={onCancel}
+      size="lg"
+      fullScreen={isMobile}
+      title={`Crop & rotate — ${idx + 1} of ${files.length}`}
+      styles={isMobile ? { body: { display: "flex", flexDirection: "column", height: "calc(100dvh - 60px)" } } : undefined}
+    >
+      <Stack style={isMobile ? { flex: 1, minHeight: 0 } : undefined}>
+        <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>
           Rotate upright, then drag to crop (optional). Straighter, tighter crops read better.
         </Text>
-        <div style={{ maxHeight: 460, overflow: "auto", textAlign: "center" }}>
+        <div
+          style={{
+            flex: isMobile ? 1 : undefined,
+            minHeight: isMobile ? 0 : undefined,
+            maxHeight: isMobile ? undefined : 460,
+            overflow: "auto",
+            textAlign: "center",
+          }}
+        >
           {src && (
             <ReactCrop crop={crop} onChange={(c) => setCrop(c)} onComplete={(c) => setCompleted(c)}>
               <img ref={imgRef} src={src} alt="capture" style={{ maxWidth: "100%" }} />
             </ReactCrop>
           )}
         </div>
-        <Group justify="space-between">
+        <Checkbox
+          style={{ flexShrink: 0 }}
+          size="sm"
+          label="Auto-generate tags with AI"
+          checked={autoTags}
+          onChange={(e) => setAutoTags(e.currentTarget.checked)}
+        />
+        <Group justify="space-between" style={{ flexShrink: 0 }} wrap="wrap">
           <Group gap="xs">
             <Button variant="default" leftSection={<IconRotate2 size={16} />} onClick={() => rotate(-1)}>
               Left

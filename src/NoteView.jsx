@@ -143,13 +143,17 @@ export default function NoteView({ note, folders, allTags, onSaved, onDeleted, d
   // - unchanged tasks → nothing
   const syncTaskTodos = async (currentTasks) => {
     let all = [];
+    let lists = [];
     try {
-      all = await api.todos();
+      [all, lists] = await Promise.all([api.todos(), api.todoLists()]);
     } catch {
       /* ignore */
     }
     const norm = (s) => (s || "").trim().toLowerCase();
-    const allTexts = new Set(all.map((t) => norm(t.text)));
+    // include checklist items too — a task already sitting in a checklist
+    // shouldn't be re-offered as "new" every time the note is saved
+    const listItemTexts = lists.flatMap((l) => l.items.map((i) => norm(i.text)));
+    const allTexts = new Set([...all.map((t) => norm(t.text)), ...listItemTexts]);
     const noteTodos = all.filter((t) => t.doc_id === note.id);
 
     // tasks not matching ANY existing todo text = new-or-edited

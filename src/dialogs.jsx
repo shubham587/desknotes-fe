@@ -45,10 +45,13 @@ function PromptBody({ id, label, placeholder, submitLabel, onSubmit }) {
 // Text-input modal (replaces window.prompt).
 export function promptText({ title, label, placeholder, submitLabel = "Create", onSubmit }) {
   const id = `prompt-${Date.now()}`;
+  // top-anchored (not vertically centered) on phones — a centered modal with
+  // a focused text input ends up rendered behind the on-screen keyboard
+  const isMobile = window.matchMedia?.("(max-width: 48em)").matches;
   modals.open({
     modalId: id,
     title,
-    centered: true,
+    centered: !isMobile,
     children: (
       <PromptBody id={id} label={label} placeholder={placeholder} submitLabel={submitLabel} onSubmit={onSubmit} />
     ),

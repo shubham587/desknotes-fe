@@ -81,6 +81,20 @@ body {
   background: var(--paper-2);
   border-right: 1px solid var(--line) !important;
 }
+/* on mobile the navbar overlays the page as a drawer — give it a floating,
+   separated feel (gap from the screen edge + a proper shadow) instead of a
+   flat panel flush against the content */
+@media (max-width: 48em) {
+  .mantine-AppShell-navbar {
+    top: 8px !important;
+    bottom: 8px !important;
+    left: 8px !important;
+    height: calc(100dvh - 16px) !important;
+    border-radius: 16px;
+    border-right: none !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+  }
+}
 
 /* --- Sidebar --- */
 .side-label {

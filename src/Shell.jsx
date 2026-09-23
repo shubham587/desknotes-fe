@@ -263,14 +263,25 @@ export default function Shell({ onLogout }) {
 
   const onDrop = (files) => setPending(files);
 
-  const transcribe = async (croppedFiles) => {
+  const transcribe = async (croppedFiles, autoTags = true) => {
     setPending(null);
     setBusy(true);
     try {
       const res = await api.capture(croppedFiles);
-      notifications.show({ message: `Saved “${res.title}”`, color: "green" });
+      let doc = res.doc;
+      // user opted out of AI tagging for this capture — strip what the model suggested
+      if (!autoTags && doc.tags.length) {
+        doc = await api.updateNote(doc.id, {
+          title: doc.title,
+          folder_id: doc.folder_id,
+          font_style: doc.font_style,
+          blocks: doc.blocks,
+          tags: [],
+        });
+      }
+      notifications.show({ message: `Saved “${doc.title}”`, color: "green" });
       dirtyRef.current = false;
-      setActive(res.doc);
+      setActive(doc);
       setView("note");
       loadNotes();
       loadMeta();
@@ -281,29 +292,76 @@ export default function Shell({ onLogout }) {
     }
   };
 
+  // Optimistic: flip the UI instantly (no round-trip wait), patch in the
+  // background, and roll back + toast if it actually fails. Removes the
+  // "feels laggy" delay on every checkbox click over the tunnel.
   const toggleTodo = async (t) => {
-    await api.toggleTodo(t.id, !t.done);
-    setTodos(await api.todos());
+    const next = !t.done;
+    setTodos((prev) => prev.map((x) => (x.id === t.id ? { ...x, done: next } : x)));
+    try {
+      await api.toggleTodo(t.id, next);
+    } catch {
+      setTodos((prev) => prev.map((x) => (x.id === t.id ? { ...x, done: t.done } : x)));
+      notifications.show({ message: "Couldn't update — try again", color: "red" });
+    }
   };
 
   const deleteTodo = async (t) => {
-    await api.deleteTodo(t.id);
     setTodos((prev) => prev.filter((x) => x.id !== t.id));
+    try {
+      await api.deleteTodo(t.id);
+    } catch {
+      setTodos((prev) => [...prev, t].sort((a, b) => a.ord - b.ord));
+      notifications.show({ message: "Couldn't delete — try again", color: "red" });
+    }
   };
   const saveTodoDetails = async (id, details) => {
     await api.updateTodoDetails(id, details);
     setTodos((prev) => prev.map((x) => (x.id === id ? { ...x, details } : x)));
   };
+  const editTodoText = async (id, text) => {
+    setTodos((prev) => prev.map((x) => (x.id === id ? { ...x, text } : x)));
+    try {
+      await api.updateTodoText(id, text);
+    } catch {
+      notifications.show({ message: "Couldn't save — try again", color: "red" });
+    }
+  };
 
   // --- checklists ---
   const refreshLists = async () => setTodoLists(await api.todoLists().catch(() => []));
   const toggleListItem = async (item) => {
-    await api.toggleTodo(item.id, !item.done);
-    await refreshLists();
+    const next = !item.done;
+    setTodoLists((prev) =>
+      prev.map((l) => ({ ...l, items: l.items.map((i) => (i.id === item.id ? { ...i, done: next } : i)) })),
+    );
+    try {
+      await api.toggleTodo(item.id, next);
+    } catch {
+      setTodoLists((prev) =>
+        prev.map((l) => ({ ...l, items: l.items.map((i) => (i.id === item.id ? { ...i, done: item.done } : i)) })),
+      );
+      notifications.show({ message: "Couldn't update — try again", color: "red" });
+    }
   };
   const deleteListItem = async (item) => {
-    await api.deleteTodo(item.id);
-    await refreshLists();
+    setTodoLists((prev) => prev.map((l) => ({ ...l, items: l.items.filter((i) => i.id !== item.id) })));
+    try {
+      await api.deleteTodo(item.id);
+    } catch {
+      await refreshLists();
+      notifications.show({ message: "Couldn't delete — try again", color: "red" });
+    }
+  };
+  const editListItemText = async (item, text) => {
+    setTodoLists((prev) =>
+      prev.map((l) => ({ ...l, items: l.items.map((i) => (i.id === item.id ? { ...i, text } : i)) })),
+    );
+    try {
+      await api.updateTodoText(item.id, text);
+    } catch {
+      notifications.show({ message: "Couldn't save — try again", color: "red" });
+    }
   };
   const addListItem = async (listId, text) => {
     await api.addListItem(listId, text);
@@ -409,6 +467,8 @@ export default function Shell({ onLogout }) {
       header={{ height: 56 }}
       navbar={{ width: 270, breakpoint: "sm", collapsed: { mobile: !opened } }}
       padding="md"
+      transitionDuration={250}
+      transitionTimingFunction="ease"
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
@@ -702,6 +762,7 @@ export default function Shell({ onLogout }) {
                 onToggleItem={toggleListItem}
                 onDeleteItem={deleteListItem}
                 onAddItem={addListItem}
+                onEditItem={editListItemText}
                 onRename={renameList}
                 onDelete={deleteList}
               />
@@ -714,6 +775,7 @@ export default function Shell({ onLogout }) {
                 onToggle={toggleTodo}
                 onDelete={deleteTodo}
                 onSaveDetails={saveTodoDetails}
+                onEditText={editTodoText}
                 onReorder={reorderTodo}
                 onMove={moveTodo}
                 isFirst={i === 0}
@@ -765,14 +827,23 @@ export default function Shell({ onLogout }) {
 }
 
 // A single todo row that expands to a notes area for extra info per task.
-function TodoRow({ t, onToggle, onDelete, onSaveDetails, onReorder, onMove, isFirst, isLast }) {
+function TodoRow({ t, onToggle, onDelete, onSaveDetails, onEditText, onReorder, onMove, isFirst, isLast }) {
   const hasDetails = !!(t.details && t.details.trim());
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(t.details || "");
   useEffect(() => setDraft(t.details || ""), [t.id, t.details]);
+  const [editing, setEditing] = useState(false);
+  const [textDraft, setTextDraft] = useState(t.text);
+  useEffect(() => setTextDraft(t.text), [t.id, t.text]);
 
   const saveDetails = () => {
     if ((draft || "") !== (t.details || "")) onSaveDetails(t.id, draft);
+  };
+  const commitText = () => {
+    setEditing(false);
+    const v = textDraft.trim();
+    if (v && v !== t.text) onEditText(t.id, v);
+    else setTextDraft(t.text);
   };
 
   return (
@@ -797,28 +868,41 @@ function TodoRow({ t, onToggle, onDelete, onSaveDetails, onReorder, onMove, isFi
               <IconChevronDown size={14} />
             </ActionIcon>
           </Stack>
-          <Checkbox
-            checked={!!t.done}
-            onChange={() => onToggle(t)}
-            radius="xl"
-            size="md"
-            styles={{
-              root: { flex: 1, minWidth: 0 },
-              body: { alignItems: "center" },
-              labelWrapper: { flex: 1, minWidth: 0 },
-              label: {
+          <Checkbox checked={!!t.done} onChange={() => onToggle(t)} radius="xl" size="md" style={{ flexShrink: 0 }} />
+          {editing ? (
+            <TextInput
+              size="sm"
+              autoFocus
+              value={textDraft}
+              onChange={(e) => setTextDraft(e.currentTarget.value)}
+              onBlur={commitText}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitText();
+                if (e.key === "Escape") {
+                  setTextDraft(t.text);
+                  setEditing(false);
+                }
+              }}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+          ) : (
+            <Text
+              onClick={() => setEditing(true)}
+              title="Click to edit"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                cursor: "text",
                 fontSize: 16,
+                wordBreak: "break-word",
                 textDecoration: t.done ? "line-through" : "none",
                 opacity: t.done ? 0.5 : 1,
-              },
-            }}
-            label={
-              <span>
-                {t.text}
-                <span style={{ fontSize: 13, opacity: 0.5, marginLeft: 8, whiteSpace: "nowrap" }}>{t.date}</span>
-              </span>
-            }
-          />
+              }}
+            >
+              {t.text}
+              <span style={{ fontSize: 13, opacity: 0.5, marginLeft: 8, whiteSpace: "nowrap" }}>{t.date}</span>
+            </Text>
+          )}
         </Group>
         <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
           <ActionIcon
@@ -872,7 +956,7 @@ function TodoRow({ t, onToggle, onDelete, onSaveDetails, onReorder, onMove, isFi
 
 // A checklist card: a named group of items with a circular progress ring,
 // inline rename, per-item toggle/delete, and an add-item box.
-function Checklist({ list, onToggleItem, onDeleteItem, onAddItem, onRename, onDelete }) {
+function Checklist({ list, onToggleItem, onDeleteItem, onAddItem, onEditItem, onRename, onDelete }) {
   // populated lists start collapsed; a brand-new empty one opens ready to fill
   const [open, setOpen] = useState(list.items.length === 0);
   const [adding, setAdding] = useState("");
@@ -971,30 +1055,7 @@ function Checklist({ list, onToggleItem, onDeleteItem, onAddItem, onRename, onDe
         <Box px="sm" pb="sm" style={{ borderTop: "1px solid var(--line)" }}>
           <Stack gap={0} pt={4}>
             {list.items.map((it) => (
-              <Group
-                key={it.id}
-                justify="space-between"
-                wrap="nowrap"
-                gap="xs"
-                py={5}
-                style={{ borderBottom: "1px solid color-mix(in srgb, var(--line) 55%, transparent)" }}
-              >
-                <Checkbox
-                  size="sm"
-                  radius="xl"
-                  checked={!!it.done}
-                  onChange={() => onToggleItem(it)}
-                  styles={{
-                    root: { flex: 1, minWidth: 0 },
-                    labelWrapper: { flex: 1, minWidth: 0 },
-                    label: { fontSize: 15, textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.5 : 1 },
-                  }}
-                  label={it.text}
-                />
-                <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => onDeleteItem(it)} aria-label="Delete item">
-                  <IconX size={14} />
-                </ActionIcon>
-              </Group>
+              <ChecklistItem key={it.id} it={it} onToggle={onToggleItem} onDelete={onDeleteItem} onEdit={onEditItem} />
             ))}
             {total === 0 && (
               <Text size="xs" c="dimmed" fs="italic" py={6}>
@@ -1003,14 +1064,22 @@ function Checklist({ list, onToggleItem, onDeleteItem, onAddItem, onRename, onDe
             )}
           </Stack>
 
-          <Group gap="xs" mt="sm" wrap="nowrap">
-            <TextInput
+          <Group gap="xs" mt="sm" wrap="nowrap" align="flex-end">
+            <Textarea
               size="xs"
               placeholder="Add item…"
+              autosize
+              minRows={1}
+              maxRows={4}
               style={{ flex: 1 }}
               value={adding}
               onChange={(e) => setAdding(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitAdd()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitAdd();
+                }
+              }}
             />
             <ActionIcon variant="light" size="lg" onClick={submitAdd} aria-label="Add item">
               <IconPlus size={16} />
@@ -1019,5 +1088,67 @@ function Checklist({ list, onToggleItem, onDeleteItem, onAddItem, onRename, onDe
         </Box>
       </Collapse>
     </Box>
+  );
+}
+
+// One checklist item: checkbox + click-to-edit text + delete.
+function ChecklistItem({ it, onToggle, onDelete, onEdit }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(it.text);
+  useEffect(() => setDraft(it.text), [it.id, it.text]);
+
+  const commit = () => {
+    setEditing(false);
+    const v = draft.trim();
+    if (v && v !== it.text) onEdit(it, v);
+    else setDraft(it.text);
+  };
+
+  return (
+    <Group
+      justify="space-between"
+      wrap="nowrap"
+      gap="xs"
+      py={5}
+      style={{ borderBottom: "1px solid color-mix(in srgb, var(--line) 55%, transparent)" }}
+    >
+      <Checkbox size="sm" radius="xl" checked={!!it.done} onChange={() => onToggle(it)} style={{ flexShrink: 0 }} />
+      {editing ? (
+        <TextInput
+          size="xs"
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              setDraft(it.text);
+              setEditing(false);
+            }
+          }}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+      ) : (
+        <Text
+          onClick={() => setEditing(true)}
+          title="Click to edit"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            cursor: "text",
+            fontSize: 15,
+            wordBreak: "break-word",
+            textDecoration: it.done ? "line-through" : "none",
+            opacity: it.done ? 0.5 : 1,
+          }}
+        >
+          {it.text}
+        </Text>
+      )}
+      <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => onDelete(it)} aria-label="Delete item">
+        <IconX size={14} />
+      </ActionIcon>
+    </Group>
   );
 }
